@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { AuthRepository } from '../repositories/auth.repository';
 import { RegisterDto } from '../dto/register.dto';
 import * as bcrypt from 'bcrypt';
@@ -7,12 +7,17 @@ import { ApiResponseDto } from '../../../common/dto/api-response.dto';
 import { OtpService } from './otp.service';
 import { VerifyOtpDto } from '../dto/verify-otp.dto';
 import { ResendOtpDto } from '../dto/resend-otp.dto';
+import { NotificationService } from '../../notification/services/notification.service';
+import { NotificationChannel } from '../../notification/constants/notification.constants';
 
 @Injectable()
 export class AuthService {
+    private readonly logger = new Logger(AuthService.name);
+
     constructor(
         private readonly authRepository: AuthRepository,
         private readonly otpService: OtpService,
+        private readonly notificationService: NotificationService,
     ) { }
 
     async register(dto: RegisterDto): Promise<ApiResponseDto<any>> {
@@ -51,7 +56,19 @@ export class AuthService {
 
         const otp = this.otpService.generateOtp();
         await this.otpService.storeOtp(user.id, otp);
-        console.log(`[OTP Verification] User registration: generated OTP for ${user.name} (${user.email}) -> ${otp}`);
+
+        this.logger.log(
+            `[Register] Sending OTP to user ${user.id} (${user.email})`,
+        );
+
+        // OTP registration: SMS only — prevents temp-email addresses from bypassing verification.
+        // To also send via email, add NotificationChannel.EMAIL to the array below.
+        await this.notificationService.sendOtp(
+            user.email,
+            user.phone_number,
+            otp,
+            [NotificationChannel.SMS, NotificationChannel.EMAIL],
+        );
 
         return new ApiResponseDto(
             true,
@@ -124,7 +141,17 @@ export class AuthService {
         await this.otpService.trackResendRequest(dto.userId);
         await this.otpService.clearAttempts(dto.userId);
 
-        console.log(`[OTP Verification] Resend request: generated new OTP for ${user.name} (${user.email}) -> ${otp}`);
+        this.logger.log(
+            `[ResendOtp] Sending new OTP to user ${dto.userId} (${user.email})`,
+        );
+
+        // OTP resend: SMS only — same restriction as registration.
+        await this.notificationService.sendOtp(
+            user.email,
+            user.phone_number,
+            otp,
+            [NotificationChannel.SMS, NotificationChannel.EMAIL],
+        );
 
         return new ApiResponseDto(
             true,
