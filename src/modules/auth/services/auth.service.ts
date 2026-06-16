@@ -99,6 +99,7 @@ export class AuthService {
         user.email ?? '',
         user.phone_number ?? null,
         notificationData,
+        [NotificationChannel.EMAIL], // Explicitly enable only email for now
       )
       .catch((err: Error) => {
         this.logger.error(

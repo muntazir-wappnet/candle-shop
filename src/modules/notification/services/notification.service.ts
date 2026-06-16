@@ -164,66 +164,78 @@ export class NotificationService {
     /**
      * Sends a security alert when a new login is detected on the account.
      *
-     * Channel behaviour:
-     * ┌──────────┬──────────┬──────────────────────────────────────────────┐
-     * │ Channel  │ Enabled? │ How to enable                                │
-     * ├──────────┼──────────┼──────────────────────────────────────────────┤
-     * │ Email    │ ✅ YES   │ Fires when OTP_EMAIL_ENABLED=true (default)  │
-     * │ SMS      │ ❌ NO    │ Uncomment the smsJob block below             │
-     * └──────────┴──────────┴──────────────────────────────────────────────┘
+     * Uses the same two-gate channel control as sendOtp():
+     *   Gate 1 — global env-var toggle (OTP_EMAIL_ENABLED / OTP_SMS_ENABLED)
+     *   Gate 2 — call-site `channels` allowlist (when provided)
+     *
+     * Current call-site sends EMAIL only:
+     *   sendLoginNotification(email, phone, data, [NotificationChannel.EMAIL])
+     *
+     * To add SMS in the future, just update the call-site to:
+     *   sendLoginNotification(email, phone, data, [NotificationChannel.EMAIL, NotificationChannel.SMS])
      *
      * This method is intentionally fire-and-forget — caller should .catch()
      * errors so a notification failure never blocks the login response.
      *
-     * @param email       Recipient email (required)
-     * @param phoneNumber Recipient phone (used when SMS is enabled)
+     * @param email       Recipient email
+     * @param phoneNumber Recipient phone (used when SMS channel is passed)
      * @param data        Device info captured at login time
+     * @param channels    Optional allowlist — same semantics as sendOtp()
      */
     async sendLoginNotification(
         email: string,
         phoneNumber: string | null,
         data: LoginNotificationData,
+        channels?: NotificationChannel[],
     ): Promise<void> {
-        const loginTime = data.time;
-
-        const emailData: NewLoginEmailData = {
-            deviceName: data.deviceName,
-            deviceType: data.deviceType,
-            ipAddress: data.ipAddress,
-            time: loginTime,
+        const isAllowed = (
+            globallyEnabled: boolean,
+            channel: NotificationChannel,
+        ): boolean => {
+            if (!globallyEnabled) return false;
+            if (channels && !channels.includes(channel)) {
+                this.logger.debug(
+                    `[LoginNotification] ${channel.toUpperCase()} skipped for ${email} — ` +
+                    `not in allowlist [${channels.join(', ')}]`,
+                );
+                return false;
+            }
+            return true;
         };
+
+        const emailAllowed = isAllowed(this.isEmailEnabled, NotificationChannel.EMAIL) && !!email;
+        const smsAllowed   = isAllowed(this.isSmsEnabled,   NotificationChannel.SMS)   && !!phoneNumber;
+
+        if (!emailAllowed && !smsAllowed) {
+            this.logger.warn(
+                `[LoginNotification] No eligible channel for ${email}. ` +
+                `Global — email:${this.isEmailEnabled} sms:${this.isSmsEnabled}. ` +
+                (channels
+                    ? `Call-site allowlist: [${channels.join(', ')}].`
+                    : 'No call-site restriction set.'),
+            );
+            return;
+        }
 
         const jobs: Promise<void>[] = [];
 
-        // ── EMAIL (enabled) ───────────────────────────────────────────────────
-        if (this.isEmailEnabled && email) {
-            jobs.push(
-                this.emailService.sendLoginNotification(email, emailData),
-            );
+        if (emailAllowed) {
+            const emailData: NewLoginEmailData = {
+                deviceName: data.deviceName,
+                deviceType: data.deviceType,
+                ipAddress: data.ipAddress,
+                time: data.time,
+            };
+            jobs.push(this.emailService.sendLoginNotification(email, emailData));
         }
 
-        // ── SMS (disabled — ready to enable) ──────────────────────────────────
-        // To enable SMS login alerts:
-        //   1. Ensure OTP_SMS_ENABLED=true in your .env
-        //   2. Uncomment the block below
-        //
-        // if (this.isSmsEnabled && phoneNumber) {
-        //     const smsData: NewLoginSmsData = {
-        //         deviceName: data.deviceName,
-        //         ipAddress: data.ipAddress,
-        //         time: loginTime,
-        //     };
-        //     jobs.push(
-        //         this.smsService.sendLoginNotification(phoneNumber, smsData),
-        //     );
-        // }
-
-        if (jobs.length === 0) {
-            this.logger.warn(
-                `[LoginNotification] No eligible channel for ${email}. ` +
-                `OTP_EMAIL_ENABLED=${this.isEmailEnabled}, OTP_SMS_ENABLED=${this.isSmsEnabled}`,
-            );
-            return;
+        if (smsAllowed) {
+            const smsData: NewLoginSmsData = {
+                deviceName: data.deviceName,
+                ipAddress: data.ipAddress,
+                time: data.time,
+            };
+            jobs.push(this.smsService.sendLoginNotification(phoneNumber!, smsData));
         }
 
         const results = await Promise.allSettled(jobs);
