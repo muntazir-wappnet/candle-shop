@@ -6,6 +6,7 @@ import * as Joi from 'joi';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { RedisModule } from './redis/redis.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -16,7 +17,10 @@ import { RedisModule } from './redis/redis.module';
         PORT: Joi.number().default(3001),
         DATABASE_URL: Joi.string().required(),
         JWT_SECRET: Joi.string().required(),
-        JWT_EXPIRES_IN: Joi.string().default('1h'),
+        JWT_EXPIRES_IN: Joi.string().default('15m'),
+        REFRESH_TOKEN_SECRET: Joi.string().required(),
+        REFRESH_TOKEN_EXPIRES_IN: Joi.string().default('7d'),
+        GOOGLE_CLIENT_ID: Joi.string().optional(),
         REDIS_URL: Joi.string().required(),
 
         // ── OTP Channel Toggles ────────────────────────────────────────────
@@ -75,6 +79,7 @@ import { RedisModule } from './redis/redis.module';
     PrismaModule,
     AuthModule,
     RedisModule,
+    ScheduleModule.forRoot(),
   ],
   controllers: [AppController],
   providers: [AppService],

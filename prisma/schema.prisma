@@ -12,19 +12,42 @@ enum UserRole {
   SUPERADMIN
 }
 
+enum AuthProvider {
+  PASSWORD
+  GOOGLE
+}
+
+enum DeviceType {
+  MOBILE
+  TABLET
+  DESKTOP
+  API
+  UNKNOWN
+}
+
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  password  String
-  phone_number    String @unique
-  isVerified Boolean  @default(false)
-  role      UserRole @default(CUSTOMER)
+  id           String       @id @default(cuid())
 
-  orders    Order[]
+  name         String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  email        String?      @unique
+  phone_number String?      @unique
+
+  password     String?
+
+  provider     AuthProvider @default(PASSWORD)
+
+  googleId     String?      @unique
+
+  isVerified   Boolean      @default(false)
+
+  role         UserRole     @default(CUSTOMER)
+
+  orders       Order[]
+  refreshTokens RefreshToken[]
+
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 }
 
 model Category {
@@ -91,4 +114,27 @@ enum OrderStatus {
   SHIPPED
   DELIVERED
   CANCELLED
+}
+
+model RefreshToken {
+  id         String     @id @default(cuid())
+
+  userId     String
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash  String
+
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+
+  // ── Device Info ─────────────────────────────────
+  userAgent  String?
+  ipAddress  String?
+  deviceName String?
+  deviceType DeviceType @default(UNKNOWN)
+
+  createdAt  DateTime   @default(now())
+
+  @@index([userId])
 }

@@ -7,10 +7,35 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 import { INotificationChannel } from '../interfaces/notification-channel.interface';
+import { OtpTemplateType } from '../enums/otp-template-type.enum';
+import { getRegistrationOtpEmailTemplate } from '../templates/email/registration-otp.template';
+import { getResendOtpEmailTemplate } from '../templates/email/resend-otp.template';
+import { getForgotPasswordOtpEmailTemplate } from '../templates/email/forgot-password-otp.template';
+import { getPasswordChangedEmailTemplate } from '../templates/email/password-changed.template';
+import { getPasswordResetEmailTemplate } from '../templates/email/password-reset.template';
 import {
-    OTP_EMAIL_SUBJECT,
-    OTP_EXPIRY_MINUTES,
-} from '../constants/notification.constants';
+    getNewLoginEmailTemplate,
+    type NewLoginEmailData,
+} from '../templates/email/new-login.template';
+
+// ─── OTP Template Map ─────────────────────────────────────────────────────────
+
+type EmailTemplateFn = (otp: string) => { subject: string; html: string; text: string };
+
+/**
+ * Maps OtpTemplateType → template function for otp-based notifications.
+ * NEW_LOGIN is intentionally omitted here — it uses its own sendLoginNotification()
+ * method because it has a different data shape (device info, not an OTP).
+ */
+const OTP_EMAIL_TEMPLATES: Partial<Record<OtpTemplateType, EmailTemplateFn>> = {
+    [OtpTemplateType.REGISTRATION]: getRegistrationOtpEmailTemplate,
+    [OtpTemplateType.RESEND]: getResendOtpEmailTemplate,
+    [OtpTemplateType.FORGOT_PASSWORD]: getForgotPasswordOtpEmailTemplate,
+    [OtpTemplateType.PASSWORD_CHANGED]: () => getPasswordChangedEmailTemplate(),
+    [OtpTemplateType.PASSWORD_RESET]: () => getPasswordResetEmailTemplate(),
+};
+
+// ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class EmailService implements INotificationChannel, OnModuleInit {
@@ -43,20 +68,28 @@ export class EmailService implements INotificationChannel, OnModuleInit {
         }
     }
 
-    async sendOtp(email: string, otp: string): Promise<void> {
+    // ─── OTP Email ────────────────────────────────────────────────────────────
+
+    async sendOtp(email: string, otp: string, templateType: OtpTemplateType): Promise<void> {
         const from = this.configService.get<string>('SMTP_FROM');
+
+        const templateFn = OTP_EMAIL_TEMPLATES[templateType];
+        if (!templateFn) {
+            throw new Error(`Unsupported OTP template type: ${templateType as string}`);
+        }
+        const template = templateFn(otp);
 
         try {
             await this.transporter.sendMail({
                 from,
                 to: email,
-                subject: OTP_EMAIL_SUBJECT,
-                html: this.buildEmailTemplate(otp),
-                text: `Your Candle Shop verification code is: ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. Do not share this code with anyone.`,
+                subject: template.subject,
+                html: template.html,
+                text: template.text,
             });
 
             this.logger.log(
-                `OTP email sent successfully to ${email}`,
+                `OTP email sent successfully to ${email} using ${templateType} template`,
             );
         } catch (error: unknown) {
             const message =
@@ -68,87 +101,38 @@ export class EmailService implements INotificationChannel, OnModuleInit {
         }
     }
 
-    private buildEmailTemplate(otp: string): string {
-        return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Your Verification Code</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f9f5f0;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9f5f0;padding:40px 0;">
-    <tr>
-      <td align="center">
-        <table width="560" cellpadding="0" cellspacing="0"
-          style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+    // ─── New Login Notification ───────────────────────────────────────────────
 
-          <!-- Header -->
-          <tr>
-            <td align="center"
-              style="background:linear-gradient(135deg,#c8956c 0%,#8b5e3c 100%);padding:36px 40px;">
-              <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:1px;">
-                🕯️ Candle Shop
-              </h1>
-              <p style="margin:8px 0 0;color:#f5e6d8;font-size:14px;">
-                Email Verification
-              </p>
-            </td>
-          </tr>
+    /**
+     * Sends a new-login security alert email with device information.
+     * Called non-blocking from AuthService after every successful authentication.
+     */
+    async sendLoginNotification(
+        email: string,
+        data: NewLoginEmailData,
+    ): Promise<void> {
+        const from = this.configService.get<string>('SMTP_FROM');
+        const template = getNewLoginEmailTemplate(data);
 
-          <!-- Body -->
-          <tr>
-            <td style="padding:40px;">
-              <p style="margin:0 0 16px;color:#4a3728;font-size:16px;line-height:1.6;">
-                Hello,
-              </p>
-              <p style="margin:0 0 24px;color:#4a3728;font-size:16px;line-height:1.6;">
-                Use the verification code below to complete your registration.
-                This code is valid for <strong>${OTP_EXPIRY_MINUTES} minutes</strong>.
-              </p>
+        try {
+            await this.transporter.sendMail({
+                from,
+                to: email,
+                subject: template.subject,
+                html: template.html,
+                text: template.text,
+            });
 
-              <!-- OTP Box -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
-                <tr>
-                  <td align="center">
-                    <div style="display:inline-block;background:#f9f5f0;border:2px dashed #c8956c;
-                                border-radius:12px;padding:20px 48px;">
-                      <span style="font-size:40px;font-weight:700;letter-spacing:12px;
-                                   color:#8b5e3c;font-family:monospace;">
-                        ${otp}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              </table>
-
-              <p style="margin:0 0 8px;color:#7a6a5e;font-size:14px;line-height:1.6;">
-                ⚠️ <strong>Do not share this code with anyone.</strong>
-                Our team will never ask for your OTP.
-              </p>
-              <p style="margin:0;color:#7a6a5e;font-size:14px;line-height:1.6;">
-                If you did not request this, you can safely ignore this email.
-              </p>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td align="center"
-              style="background-color:#f9f5f0;padding:24px 40px;border-top:1px solid #ede8e3;">
-              <p style="margin:0;color:#a89890;font-size:12px;">
-                © ${new Date().getFullYear()} Candle Shop. All rights reserved.
-              </p>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-    `.trim();
+            this.logger.log(
+                `New login notification email sent to ${email} — device: ${data.deviceName}`,
+            );
+        } catch (error: unknown) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+            this.logger.error(
+                `Failed to send new login email to ${email}: ${message}`,
+            );
+            throw error;
+        }
     }
 }

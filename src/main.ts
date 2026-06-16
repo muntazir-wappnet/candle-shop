@@ -3,11 +3,17 @@ import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ResponseInterceptor } from './common/interceptors/response/response.interceptor';
 import { ValidationPipe } from '@nestjs/common';
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   console.log('DATABASE_URL:', process.env.DATABASE_URL);
 
-  const app = await NestFactory.create(AppModule);  
+  const app = await NestFactory.create(AppModule);
+
+  // Enable cookie parsing — required for reading HttpOnly refresh_token cookie
+  // in RefreshTokenStrategy (req.cookies is undefined without this)
+  app.use(cookieParser());
+
   const config = new DocumentBuilder()
   .setTitle('Candle Shop API')
   .setDescription('API Documentation')

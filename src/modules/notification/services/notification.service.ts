@@ -4,10 +4,20 @@ import { AppException } from '../../../common/exceptions/app.exception';
 import { EmailService } from './email.service';
 import { SmsService } from './sms.service';
 import { NotificationChannel } from '../constants/notification.constants';
+import { OtpTemplateType } from '../enums/otp-template-type.enum';
+import type { NewLoginEmailData } from '../templates/email/new-login.template';
+import type { NewLoginSmsData } from '../templates/sms/new-login.template';
 
 export interface OtpDeliveryResult {
     emailSent: boolean;
     smsSent: boolean;
+}
+
+export interface LoginNotificationData {
+    deviceName: string | null;
+    deviceType: string;
+    ipAddress: string | null;
+    time: string;
 }
 
 @Injectable()
@@ -42,24 +52,16 @@ export class NotificationService {
      * @param email       Recipient email address
      * @param phoneNumber Recipient phone number (10-digit local format)
      * @param otp         One-time password to deliver
+     * @param templateType Template to render
      * @param channels    Optional allowlist — pass to restrict which channels
      *                    this specific call may use. When provided, only channels
      *                    present in this array AND globally enabled will fire.
-     *
-     * @example
-     *   // OTP registration — SMS only (blocks temp-email abuse)
-     *   await notificationService.sendOtp(email, phone, otp, [NotificationChannel.SMS]);
-     *
-     *   // Password-reset alert — both channels
-     *   await notificationService.sendOtp(email, phone, otp, [NotificationChannel.EMAIL, NotificationChannel.SMS]);
-     *
-     *   // No per-call restriction — respects global toggles only
-     *   await notificationService.sendOtp(email, phone, otp);
      */
     async sendOtp(
         email: string,
         phoneNumber: string,
         otp: string,
+        templateType: OtpTemplateType,
         channels?: NotificationChannel[],
     ): Promise<OtpDeliveryResult> {
         const result: OtpDeliveryResult = {
@@ -88,12 +90,12 @@ export class NotificationService {
             return true;
         };
 
-        const emailAllowed = isAllowed(this.isEmailEnabled, NotificationChannel.EMAIL);
-        const smsAllowed   = isAllowed(this.isSmsEnabled,   NotificationChannel.SMS);
+        const emailAllowed = isAllowed(this.isEmailEnabled, NotificationChannel.EMAIL) && !!email;
+        const smsAllowed   = isAllowed(this.isSmsEnabled,   NotificationChannel.SMS) && !!phoneNumber;
 
         if (!emailAllowed && !smsAllowed) {
             this.logger.warn(
-                `[OTP] No eligible delivery channel for ${email}. ` +
+                `[OTP] No eligible delivery channel for ${email || 'unknown'}. ` +
                 `Global — email:${this.isEmailEnabled} sms:${this.isSmsEnabled}. ` +
                 (channels
                     ? `Call-site allowlist: [${channels.join(', ')}].`
@@ -112,14 +114,14 @@ export class NotificationService {
         if (emailAllowed) {
             jobs.push({
                 name: NotificationChannel.EMAIL,
-                promise: this.emailService.sendOtp(email, otp),
+                promise: this.emailService.sendOtp(email, otp, templateType),
             });
         }
 
         if (smsAllowed) {
             jobs.push({
                 name: NotificationChannel.SMS,
-                promise: this.smsService.sendOtp(phoneNumber, otp),
+                promise: this.smsService.sendOtp(phoneNumber, otp, templateType),
             });
         }
 
@@ -143,7 +145,7 @@ export class NotificationService {
                         : String(settlement.reason);
 
                 this.logger.error(
-                    `[OTP] ${channelName.toUpperCase()} channel failed for ${email}: ${reason}`,
+                    `[OTP] ${channelName.toUpperCase()} channel failed for ${email || 'unknown'}: ${reason}`,
                 );
             }
         });
@@ -156,5 +158,86 @@ export class NotificationService {
 
         return result;
     }
-}
 
+    // ─── New Login Notification ───────────────────────────────────────────────
+
+    /**
+     * Sends a security alert when a new login is detected on the account.
+     *
+     * Channel behaviour:
+     * ┌──────────┬──────────┬──────────────────────────────────────────────┐
+     * │ Channel  │ Enabled? │ How to enable                                │
+     * ├──────────┼──────────┼──────────────────────────────────────────────┤
+     * │ Email    │ ✅ YES   │ Fires when OTP_EMAIL_ENABLED=true (default)  │
+     * │ SMS      │ ❌ NO    │ Uncomment the smsJob block below             │
+     * └──────────┴──────────┴──────────────────────────────────────────────┘
+     *
+     * This method is intentionally fire-and-forget — caller should .catch()
+     * errors so a notification failure never blocks the login response.
+     *
+     * @param email       Recipient email (required)
+     * @param phoneNumber Recipient phone (used when SMS is enabled)
+     * @param data        Device info captured at login time
+     */
+    async sendLoginNotification(
+        email: string,
+        phoneNumber: string | null,
+        data: LoginNotificationData,
+    ): Promise<void> {
+        const loginTime = data.time;
+
+        const emailData: NewLoginEmailData = {
+            deviceName: data.deviceName,
+            deviceType: data.deviceType,
+            ipAddress: data.ipAddress,
+            time: loginTime,
+        };
+
+        const jobs: Promise<void>[] = [];
+
+        // ── EMAIL (enabled) ───────────────────────────────────────────────────
+        if (this.isEmailEnabled && email) {
+            jobs.push(
+                this.emailService.sendLoginNotification(email, emailData),
+            );
+        }
+
+        // ── SMS (disabled — ready to enable) ──────────────────────────────────
+        // To enable SMS login alerts:
+        //   1. Ensure OTP_SMS_ENABLED=true in your .env
+        //   2. Uncomment the block below
+        //
+        // if (this.isSmsEnabled && phoneNumber) {
+        //     const smsData: NewLoginSmsData = {
+        //         deviceName: data.deviceName,
+        //         ipAddress: data.ipAddress,
+        //         time: loginTime,
+        //     };
+        //     jobs.push(
+        //         this.smsService.sendLoginNotification(phoneNumber, smsData),
+        //     );
+        // }
+
+        if (jobs.length === 0) {
+            this.logger.warn(
+                `[LoginNotification] No eligible channel for ${email}. ` +
+                `OTP_EMAIL_ENABLED=${this.isEmailEnabled}, OTP_SMS_ENABLED=${this.isSmsEnabled}`,
+            );
+            return;
+        }
+
+        const results = await Promise.allSettled(jobs);
+
+        results.forEach((result, i) => {
+            if (result.status === 'rejected') {
+                const reason =
+                    result.reason instanceof Error
+                        ? result.reason.message
+                        : String(result.reason);
+                this.logger.error(
+                    `[LoginNotification] Channel ${i} failed for ${email}: ${reason}`,
+                );
+            }
+        });
+    }
+}
