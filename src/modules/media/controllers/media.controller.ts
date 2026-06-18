@@ -21,11 +21,13 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { AssetService } from '../../asset/services/asset.service';
+import { AssetResponseDto, AssetResponseListDto } from '../../asset/dto/asset-response.dto';
 import { MediaService } from '../services/media.service';
 import type { MulterFile } from '../services/media.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { ApiSuccessResponse } from '../../../common/decorators/api-success-response.decorator';
-import { MediaResponseDto, MediaResponseListDto } from '../dto/media-response.dto';
+import { MediaResponseListDto } from '../dto/media-response.dto';
 import { MediaEntityType } from '../enums/media-entity-type.enum';
 import { UploadMediaDto } from '../dto/upload-media.dto';
 
@@ -36,7 +38,10 @@ const MEMORY_STORAGE = memoryStorage();
 @UseGuards(JwtAuthGuard)
 @Controller('media')
 export class MediaController {
-  constructor(private readonly mediaService: MediaService) {}
+  constructor(
+    private readonly mediaService: MediaService,
+    private readonly assetService: AssetService,
+  ) {}
   @Post('upload')
   @UseInterceptors(FileInterceptor('file', { storage: MEMORY_STORAGE }))
   @ApiOperation({
@@ -67,13 +72,14 @@ export class MediaController {
       },
     },
   })
-  @ApiSuccessResponse('File uploaded successfully', MediaResponseDto)
+  @ApiSuccessResponse('File uploaded successfully', AssetResponseDto)
   async uploadSingle(
     @UploadedFile() file: MulterFile,
     @Body() dto: UploadMediaDto,
   ) {
-    const result = await this.mediaService.uploadImage(file, dto.entityType, dto.entityId);
-    return { message: 'File uploaded successfully', data: result };
+    const rawResult = await this.mediaService.uploadImage(file, dto.entityType, dto.entityId);
+    const asset = await this.assetService.registerAssetFromMedia(rawResult, file.mimetype);
+    return { message: 'File uploaded successfully', data: asset };
   }
 
   @Post('upload-multiple')
@@ -106,21 +112,26 @@ export class MediaController {
       },
     },
   })
-  @ApiSuccessResponse('Files uploaded successfully', MediaResponseListDto)
+  @ApiSuccessResponse('Files uploaded successfully', AssetResponseListDto)
   async uploadMultiple(
     @UploadedFiles() files: MulterFile[],
     @Body() dto: UploadMediaDto,
   ) {
-    const results = await this.mediaService.uploadImages(files, dto.entityType, dto.entityId);
-    return { message: 'Files uploaded successfully', data: { items: results } };
+    const rawResults = await this.mediaService.uploadImages(files, dto.entityType, dto.entityId);
+    const assets = await Promise.all(
+      rawResults.map((raw, index) => 
+        this.assetService.registerAssetFromMedia(raw, files[index].mimetype)
+      )
+    );
+    return { message: 'Files uploaded successfully', data: { items: assets } };
   }
 
   
   @Delete('*publicId')
   @ApiOperation({
-    summary:     'Delete a media asset by public ID',
-    description: 'Permanently removes an asset from the storage provider. ' +
-                 'The publicId is the value returned by the upload endpoint.',
+    summary:     'Delete a media asset by public ID (Soft Delete)',
+    description: 'Routes the deletion request to the Asset Module to safely ' +
+                 'schedule the asset for physical deletion after the cleanup threshold elapses.',
   })
   @ApiParam({
     name:        'publicId',
@@ -138,7 +149,7 @@ export class MediaController {
     @Param('publicId') publicId: string,  // captured by *publicId wildcard
     @Query('resourceType') resourceType: 'image' | 'video' | 'raw' = 'image',
   ) {
-    await this.mediaService.deleteImage(publicId, resourceType);
-    return { message: 'Asset deleted successfully' };
+    await this.assetService.scheduleDeletionByPublicId(publicId, resourceType);
+    return { message: 'Asset deletion scheduled successfully' };
   }
 }
