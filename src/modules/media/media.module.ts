@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
 import { STORAGE_PROVIDER } from './constants/media.constants';
@@ -11,11 +11,13 @@ import { MediaService } from './services/media.service';
 import { MediaController } from './controllers/media.controller';
 
 import { AuthModule } from '../auth/auth.module';
+import { AssetModule } from '../asset/asset.module';
 
 @Module({
   imports: [
     ConfigModule,
     AuthModule,
+    forwardRef(() => AssetModule),
   ],
 
   providers: [

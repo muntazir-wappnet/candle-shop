@@ -7,6 +7,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { RedisModule } from './redis/redis.module';
 import { MediaModule } from './modules/media/media.module';
+import { AssetModule } from './modules/asset/asset.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -84,12 +85,16 @@ import { ScheduleModule } from '@nestjs/schedule';
         // ── Media limits (optional, defaults applied in MediaService) ──────
         MEDIA_MAX_FILE_SIZE_MB:    Joi.number().default(10),
         MEDIA_ALLOWED_MIME_TYPES:  Joi.string().optional(),
+
+        // ── Asset Module ───────────────────────────────────────────────────
+        ASSET_CLEANUP_THRESHOLD_HOURS: Joi.number().default(24),
       }),
     }),
     PrismaModule,
     AuthModule,
     RedisModule,
     MediaModule,
+    AssetModule,
     ScheduleModule.forRoot(),
   ],
   controllers: [AppController],

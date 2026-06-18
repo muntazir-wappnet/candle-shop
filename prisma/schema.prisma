@@ -116,6 +116,80 @@ enum OrderStatus {
   CANCELLED
 }
 
+// ── Asset Module ──────────────────────────────────────────────────────────────
+
+enum AssetStatus {
+  TEMPORARY        // Uploaded but not yet attached to any entity
+  ACTIVE           // Currently in use by at least one entity
+  PENDING_DELETION // No longer referenced — queued for Cloudinary cleanup
+  DELETED          // Cleanup completed (historical record)
+}
+
+enum AssetProvider {
+  CLOUDINARY
+}
+
+enum AssetOwnerType {
+  CATEGORY
+  PRODUCT
+  PRODUCT_VARIANT
+}
+
+enum AssetRole {
+  COVER   // Primary/hero image for an entity
+  GALLERY // One of many gallery images
+}
+
+model Asset {
+  id             String        @id @default(cuid())
+  provider       AssetProvider @default(CLOUDINARY)
+
+  // ── Cloudinary metadata ────────────────────────────────────────────────────
+  publicId       String        @unique
+  url            String
+  optimizedUrl   String
+  thumbnailUrl   String
+  placeholderUrl String
+
+  // ── Dimensions & file info ─────────────────────────────────────────────────
+  width          Int           @default(0)
+  height         Int           @default(0)
+  format         String
+  mimeType       String
+  size           Int           // in bytes
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+  status         AssetStatus   @default(TEMPORARY)
+
+  references     AssetReference[]
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([publicId])
+  @@index([status])
+}
+
+model AssetReference {
+  id        String         @id @default(cuid())
+
+  assetId   String
+  asset     Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  // ── Owner ──────────────────────────────────────────────────────────────────
+  ownerType AssetOwnerType
+  ownerId   String
+
+  // ── Usage context ──────────────────────────────────────────────────────────
+  role      AssetRole      @default(COVER)
+  sortOrder Int            @default(0)
+  isPrimary Boolean        @default(false)
+
+  createdAt DateTime       @default(now())
+
+  @@index([ownerType, ownerId])
+}
+
 model RefreshToken {
   id         String     @id @default(cuid())
 
