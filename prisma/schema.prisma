@@ -43,8 +43,12 @@ model User {
 
   role         UserRole     @default(CUSTOMER)
 
-  orders       Order[]
+  orders        Order[]
   refreshTokens RefreshToken[]
+
+  sellerApplicationsAsApplicant SellerApplication[] @relation("SellerApplicationApplicant")
+  sellerApplicationsAsReviewer  SellerApplication[] @relation("SellerApplicationReviewer")
+  seller                        Seller?
 
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -133,6 +137,19 @@ enum AssetOwnerType {
   CATEGORY
   PRODUCT
   PRODUCT_VARIANT
+  SELLER_APPLICATION
+}
+
+enum SellerApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SellerStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
 }
 
 enum AssetRole {
@@ -161,7 +178,8 @@ model Asset {
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   status         AssetStatus   @default(TEMPORARY)
 
-  references     AssetReference[]
+  references         AssetReference[]
+  sellerApplications SellerApplication[]
 
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -211,4 +229,46 @@ model RefreshToken {
   createdAt  DateTime   @default(now())
 
   @@index([userId])
+}
+
+// ── Seller Onboarding ─────────────────────────────────────────────────────────
+
+model SellerApplication {
+  id                          String                  @id @default(cuid())
+  userId                      String
+  storeName                   String
+  description                 String
+  gstNumber                   String?
+  instagramUrl                String?
+  websiteUrl                  String?
+  verificationDocumentAssetId String
+  status                      SellerApplicationStatus @default(PENDING)
+  reviewerId                  String?
+  reviewedAt                  DateTime?
+  rejectionReason             String?
+
+  applicant                 User  @relation("SellerApplicationApplicant", fields: [userId], references: [id])
+  reviewer                  User? @relation("SellerApplicationReviewer", fields: [reviewerId], references: [id])
+  verificationDocumentAsset Asset @relation(fields: [verificationDocumentAssetId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Seller {
+  id          String       @id @default(cuid())
+  userId      String       @unique
+  storeName   String
+  description String
+  slug        String       @unique
+  status      SellerStatus @default(ACTIVE)
+  approvedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

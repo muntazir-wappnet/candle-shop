@@ -8,33 +8,6 @@ import twilio from 'twilio';
 import type { Twilio } from 'twilio';
 import type { MessageInstance } from 'twilio/lib/rest/api/v2010/account/message';
 import { INotificationChannel } from '../interfaces/notification-channel.interface';
-import { OtpTemplateType } from '../enums/otp-template-type.enum';
-import { getRegistrationOtpSmsTemplate } from '../templates/sms/registration-otp.template';
-import { getResendOtpSmsTemplate } from '../templates/sms/resend-otp.template';
-import { getForgotPasswordOtpSmsTemplate } from '../templates/sms/forgot-password-otp.template';
-import { getPasswordChangedSmsTemplate } from '../templates/sms/password-changed.template';
-import { getPasswordResetSmsTemplate } from '../templates/sms/password-reset.template';
-import {
-    getNewLoginSmsTemplate,
-    type NewLoginSmsData,
-} from '../templates/sms/new-login.template';
-
-// ─── OTP Template Map ─────────────────────────────────────────────────────────
-
-type SmsTemplateFn = (otp: string) => string;
-
-/**
- * Maps OtpTemplateType → template function for OTP-based SMS.
- * NEW_LOGIN is intentionally omitted — it uses sendLoginNotification()
- * because it carries device info, not an OTP string.
- */
-const OTP_SMS_TEMPLATES: Partial<Record<OtpTemplateType, SmsTemplateFn>> = {
-    [OtpTemplateType.REGISTRATION]: getRegistrationOtpSmsTemplate,
-    [OtpTemplateType.RESEND]: getResendOtpSmsTemplate,
-    [OtpTemplateType.FORGOT_PASSWORD]: getForgotPasswordOtpSmsTemplate,
-    [OtpTemplateType.PASSWORD_CHANGED]: () => getPasswordChangedSmsTemplate(),
-    [OtpTemplateType.PASSWORD_RESET]: () => getPasswordResetSmsTemplate(),
-};
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -70,52 +43,17 @@ export class SmsService implements INotificationChannel, OnModuleInit {
         this.logger.log('Twilio SMS client initialised successfully');
     }
 
-    // ─── OTP SMS ──────────────────────────────────────────────────────────────
 
-    async sendOtp(phoneNumber: string, otp: string, templateType: OtpTemplateType): Promise<void> {
-        if (!this.client) {
-            throw new Error(
-                'Twilio client is not initialised. Check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.',
-            );
-        }
-
-        const e164Number = this.toE164(phoneNumber);
-
-        const templateFn = OTP_SMS_TEMPLATES[templateType];
-        if (!templateFn) {
-            throw new Error(`Unsupported OTP template type: ${templateType as string}`);
-        }
-        const body = templateFn(otp);
-
-        await this.sendSms(e164Number, body, templateType);
-    }
-
-    // ─── New Login Notification ───────────────────────────────────────────────
+    // ─── Generic Delivery ─────────────────────────────────────────────────────
 
     /**
-     * Sends a new-login SMS alert with device information.
-     *
-     * NOTE: This method is implemented and ready, but the SMS channel is
-     * intentionally NOT enabled for new login alerts (email-only by default).
-     *
-     * To enable SMS login alerts, update sendLoginNotification() in
-     * NotificationService to include NotificationChannel.SMS in the
-     * channels array for this call.
+     * Generic SMS delivery — pure Twilio transport.
+     * All template rendering must be performed by the caller.
+     * Use this for any notification that is NOT OTP-based.
      */
-    async sendLoginNotification(
-        phoneNumber: string,
-        data: NewLoginSmsData,
-    ): Promise<void> {
-        if (!this.client) {
-            throw new Error(
-                'Twilio client is not initialised. Check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.',
-            );
-        }
-
+    async send(phoneNumber: string, body: string): Promise<void> {
         const e164Number = this.toE164(phoneNumber);
-        const body = getNewLoginSmsTemplate(data);
-
-        await this.sendSms(e164Number, body, OtpTemplateType.NEW_LOGIN);
+        await this.sendSms(e164Number, body, 'GENERIC');
     }
 
     // ─── Private Helpers ─────────────────────────────────────────────────────
@@ -126,7 +64,7 @@ export class SmsService implements INotificationChannel, OnModuleInit {
     private async sendSms(
         e164Number: string,
         body: string,
-        templateType: OtpTemplateType,
+        templateLabel: string,
     ): Promise<void> {
         let message: MessageInstance;
 
@@ -147,7 +85,7 @@ export class SmsService implements INotificationChannel, OnModuleInit {
         }
 
         this.logger.log(
-            `SMS sent to ${e164Number} using ${templateType} template — SID: ${message.sid} — Status: ${message.status}`,
+            `SMS sent to ${e164Number} using ${templateLabel} template — SID: ${message.sid} — Status: ${message.status}`,
         );
     }
 

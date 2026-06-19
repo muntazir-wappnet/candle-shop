@@ -1,9 +1,9 @@
-import { OtpTemplateType } from '../enums/otp-template-type.enum';
-
 export interface INotificationChannel {
-  sendOtp(
+  /**
+   * Send a generic notification.
+   */
+  send(
     recipient: string,
-    otp: string,
-    templateType: OtpTemplateType,
+    content: any,
   ): Promise<void>;
 }

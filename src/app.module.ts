@@ -9,6 +9,7 @@ import { RedisModule } from './redis/redis.module';
 import { MediaModule } from './modules/media/media.module';
 import { AssetModule } from './modules/asset/asset.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { SellerModule } from './modules/seller/seller.module';
 
 @Module({
   imports: [
@@ -96,6 +97,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     MediaModule,
     AssetModule,
     ScheduleModule.forRoot(),
+    SellerModule,
   ],
   controllers: [AppController],
   providers: [AppService],

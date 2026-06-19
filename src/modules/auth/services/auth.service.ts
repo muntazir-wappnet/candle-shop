@@ -18,13 +18,14 @@ import { TokenService } from './token.service';
 import { AppException } from '../../../common/exceptions/app.exception';
 import { ApiResponseDto } from '../../../common/dto/api-response.dto';
 import { NotificationService } from '../../notification/services/notification.service';
-import type { LoginNotificationData } from '../../notification/services/notification.service';
+import type { NewLoginEmailData } from '../../notification/templates/email/new-login.template';
 import { NotificationChannel } from '../../notification/constants/notification.constants';
+import { NotificationEvent } from '../../notification/enums/notification-event.enum';
 import { OtpPurpose } from '../enums/otp-purpose.enum';
-import { OtpTemplateType } from '../../notification/enums/otp-template-type.enum';
 import { RedisService } from '../../../redis/redis.service';
 import { hashPassword, comparePassword } from '../helpers/password.helper';
 import { DeviceInfo } from '../helpers/device-info.helper';
+import { CommerceProfileService } from '../../seller/services/commerce-profile.service';
 
 const PASSWORD_RESET_TTL = 600; // 10 minutes
 
@@ -39,11 +40,12 @@ export class AuthService {
     private readonly tokenService: TokenService,
     private readonly googleService: GoogleService,
     private readonly redisService: RedisService,
+    private readonly commerceProfileService: CommerceProfileService,
   ) {}
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-  private buildUserPayload(user: {
+  private async buildUserPayload(user: {
     id: string;
     name: string | null;
     email: string | null;
@@ -52,6 +54,8 @@ export class AuthService {
     isVerified: boolean;
     provider: $Enums.AuthProvider;
   }) {
+    const commerceProfile = await this.commerceProfileService.getUserCommerceProfile(user.id);
+
     return {
       id: user.id,
       name: user.name,
@@ -60,6 +64,7 @@ export class AuthService {
       role: user.role,
       isVerified: user.isVerified,
       provider: user.provider,
+      commerceProfile,
     };
   }
 
@@ -87,7 +92,7 @@ export class AuthService {
     );
 
     // Fire new login notification non-blocking — failure must never block the login response
-    const notificationData: LoginNotificationData = {
+    const notificationData: NewLoginEmailData = {
       deviceName: deviceInfo.deviceName,
       deviceType: deviceInfo.deviceType,
       ipAddress: deviceInfo.ipAddress,
@@ -95,9 +100,9 @@ export class AuthService {
     };
 
     this.notificationService
-      .sendLoginNotification(
-        user.email ?? '',
-        user.phone_number ?? null,
+      .dispatch(
+        { email: user.email, phoneNumber: user.phone_number },
+        NotificationEvent.NEW_LOGIN,
         notificationData,
         [NotificationChannel.EMAIL], // Explicitly enable only email for now
       )
@@ -141,11 +146,10 @@ export class AuthService {
       `[Register] Sending OTP to user ${user.id} (${user.email})`,
     );
 
-    await this.notificationService.sendOtp(
-      user.email!,
-      user.phone_number!,
-      otp,
-      OtpTemplateType.REGISTRATION,
+    await this.notificationService.dispatch(
+      { email: user.email, phoneNumber: user.phone_number },
+      NotificationEvent.REGISTRATION_OTP,
+      { otp },
       [NotificationChannel.SMS, NotificationChannel.EMAIL],
     );
 
@@ -210,7 +214,7 @@ export class AuthService {
 
       return new ApiResponseDto(true, 'OTP verified successfully', {
         accessToken,
-        user: this.buildUserPayload({ ...user, isVerified: true }),
+        user: await this.buildUserPayload({ ...user, isVerified: true }),
       });
     }
 
@@ -256,11 +260,10 @@ export class AuthService {
       `[ResendOtp] Sending new OTP to user ${dto.userId} (${user.email}) purpose=${dto.purpose}`,
     );
 
-    await this.notificationService.sendOtp(
-      user.email ?? '',
-      user.phone_number ?? '',
-      otp,
-      OtpTemplateType.RESEND,
+    await this.notificationService.dispatch(
+      { email: user.email, phoneNumber: user.phone_number },
+      NotificationEvent.RESEND_OTP,
+      { otp },
       [NotificationChannel.SMS, NotificationChannel.EMAIL],
     );
 
@@ -305,11 +308,10 @@ export class AuthService {
         `[Login] Unverified user ${user.id} — resending OTP automatically`,
       );
 
-      await this.notificationService.sendOtp(
-        user.email!,
-        user.phone_number!,
-        otp,
-        OtpTemplateType.REGISTRATION,
+      await this.notificationService.dispatch(
+        { email: user.email, phoneNumber: user.phone_number },
+        NotificationEvent.REGISTRATION_OTP,
+        { otp },
         [NotificationChannel.SMS, NotificationChannel.EMAIL],
       );
 
@@ -327,7 +329,7 @@ export class AuthService {
 
     return new ApiResponseDto(true, 'Login successful', {
       accessToken,
-      user: this.buildUserPayload(user),
+      user: await this.buildUserPayload(user),
     });
   }
 
@@ -358,11 +360,10 @@ export class AuthService {
       `[ForgotPassword] Sending reset OTP to user ${user.id} (${user.phone_number})`,
     );
 
-    await this.notificationService.sendOtp(
-      user.email ?? '',
-      user.phone_number!,
-      otp,
-      OtpTemplateType.FORGOT_PASSWORD,
+    await this.notificationService.dispatch(
+      { email: user.email, phoneNumber: user.phone_number },
+      NotificationEvent.FORGOT_PASSWORD_OTP,
+      { otp },
       [NotificationChannel.SMS, NotificationChannel.EMAIL],
     );
 
@@ -400,11 +401,10 @@ export class AuthService {
 
     // Send password reset notification (non-blocking)
     this.notificationService
-      .sendOtp(
-        user.email ?? '',
-        user.phone_number ?? '',
-        '',
-        OtpTemplateType.PASSWORD_RESET,
+      .dispatch(
+        { email: user.email, phoneNumber: user.phone_number },
+        NotificationEvent.PASSWORD_RESET,
+        undefined as void,
         [NotificationChannel.EMAIL],
       )
       .catch((err) => {
@@ -441,7 +441,7 @@ export class AuthService {
 
     return new ApiResponseDto(true, 'Google login successful', {
       accessToken,
-      user: this.buildUserPayload(user),
+      user: await this.buildUserPayload(user),
     });
   }
 
@@ -605,7 +605,7 @@ export class AuthService {
     );
 
     return new ApiResponseDto(true, 'Phone number linked successfully', {
-      user: this.buildUserPayload(updated),
+      user: await this.buildUserPayload(updated),
     });
   }
 
@@ -649,11 +649,10 @@ export class AuthService {
 
     // Send password change notification (non-blocking)
     this.notificationService
-      .sendOtp(
-        user.email ?? '',
-        user.phone_number ?? '',
-        '',
-        OtpTemplateType.PASSWORD_CHANGED,
+      .dispatch(
+        { email: user.email, phoneNumber: user.phone_number },
+        NotificationEvent.PASSWORD_CHANGED,
+        undefined as void,
         [NotificationChannel.EMAIL],
       )
       .catch((err) => {

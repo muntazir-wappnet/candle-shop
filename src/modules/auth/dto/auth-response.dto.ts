@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole, AuthProvider, DeviceType } from '@prisma/client';
+import { CommerceProfileDto } from '../../seller/dto/commerce-profile.dto';
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,9 @@ export class UserResponseDto {
 
   @ApiProperty({ enum: AuthProvider, example: AuthProvider.PASSWORD })
   provider!: AuthProvider;
+
+  @ApiProperty({ type: () => CommerceProfileDto, required: false })
+  commerceProfile?: CommerceProfileDto;
 }
 
 // ─── Register ────────────────────────────────────────────────────────────────

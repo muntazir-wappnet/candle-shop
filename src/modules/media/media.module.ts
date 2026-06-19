@@ -16,7 +16,7 @@ import { AssetModule } from '../asset/asset.module';
 @Module({
   imports: [
     ConfigModule,
-    AuthModule,
+    forwardRef(() => AuthModule),
     forwardRef(() => AssetModule),
   ],
 

@@ -5,4 +5,5 @@ export enum MediaEntityType {
   AVATARS    = 'avatars',
   REVIEWS    = 'reviews',
   BLOGS      = 'blogs',
+  SELLER_DOCUMENTS = 'seller-documents',
 }

@@ -15,10 +15,12 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RefreshTokenGuard } from './guards/refresh-token.guard';
 import { RedisService } from '../../redis/redis.service';
 import { NotificationModule } from '../notification/notification.module';
+import { SellerModule } from '../seller/seller.module';
 
 @Module({
   imports: [
     NotificationModule,
+    SellerModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
